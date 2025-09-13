@@ -676,7 +676,7 @@ const Canva = () => {
                 type="number"
                 defaultValue="1000"
                 id="templateWidth"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="text-black w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
@@ -685,7 +685,7 @@ const Canva = () => {
                 type="number"
                 defaultValue="600"
                 id="templateHeight"
-                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="text-black w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div className="flex gap-3 pt-4">
@@ -1592,7 +1592,7 @@ const Canva = () => {
                     type="text"
                     value={selectedShape.name}
                     onChange={(e) => updateShapeProperty("name", e.target.value)}
-                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
 
@@ -1634,7 +1634,7 @@ const Canva = () => {
                           type="number"
                           value={selectedShape.width}
                           onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                       <div>
@@ -1643,7 +1643,7 @@ const Canva = () => {
                           type="number"
                           value={selectedShape.height}
                           onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                     </div>
@@ -1658,7 +1658,7 @@ const Canva = () => {
                         type="text"
                         value={selectedShape.text}
                         onChange={(e) => updateShapeProperty("text", e.target.value)}
-                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -1668,7 +1668,7 @@ const Canva = () => {
                           type="number"
                           value={selectedShape.fontSize}
                           onChange={(e) => updateShapeProperty("fontSize", parseInt(e.target.value))}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                       <div>
@@ -1677,7 +1677,7 @@ const Canva = () => {
                           type="color"
                           value={selectedShape.fill}
                           onChange={(e) => updateShapeProperty("fill", e.target.value)}
-                          className="w-full h-10 rounded-lg border border-gray-300"
+                          className="text-black w-full h-10 rounded-lg border border-gray-300"
                         />
                       </div>
                     </div>
@@ -1693,7 +1693,7 @@ const Canva = () => {
                           type="number"
                           value={selectedShape.width}
                           onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                       <div>
@@ -1702,7 +1702,7 @@ const Canva = () => {
                           type="number"
                           value={selectedShape.height}
                           onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
-                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="text-black w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                     </div>

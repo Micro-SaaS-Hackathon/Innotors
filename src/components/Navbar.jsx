@@ -1,12 +1,11 @@
 import React from "react";
-import Link from "next/link"; // If using Next.js; otherwise, use <a> tags
+import Link from "next/link"; 
 
 const Navbar = () => {
   return (
     <nav className="sticky top-0 z-50 bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Left Section - Branding */}
           <div className="flex items-center">
             <Link href="/">
               <div className="flex items-center gap-2 cursor-pointer">
@@ -29,13 +28,6 @@ const Navbar = () => {
             </Link>
           </div>
 
-          <div className="hidden md:flex items-center space-x-4">
-            <Link href="/upload">
-              <span className="text-gray-700 hover:text-indigo-600 transition-colors font-medium cursor-pointer">
-                Editor
-              </span>
-            </Link>
-            </div>
 
           <div className="flex items-center gap-3">
             <Link href="/login">
@@ -43,14 +35,13 @@ const Navbar = () => {
                 Login
               </button>
             </Link>
-            <Link href="/signup">
+            <Link href="/register">
               <button className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-blue-600 text-white font-medium rounded-lg shadow hover:from-indigo-600 hover:to-blue-700 transition-all">
                 Sign Up
               </button>
             </Link>
           </div>
 
-          {/* Mobile Menu */}
           <div className="md:hidden flex items-center">
             <button
               className="text-gray-700 hover:text-indigo-600 focus:outline-none focus:text-indigo-600"

@@ -1,6 +1,7 @@
 "use client"
 import React, { useState } from "react";
 import Link from "next/link"; 
+import Navbar from "@/components/Navbar"
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -80,7 +81,7 @@ const Login = () => {
 
         <div className="mt-4 text-center">
           <span className="text-gray-600">Don't have an account? </span>
-          <Link href="/signup" className="text-blue-600 font-medium hover:underline">
+          <Link href="/register" className="text-blue-600 font-medium hover:underline">
             Sign Up
           </Link>
         </div>

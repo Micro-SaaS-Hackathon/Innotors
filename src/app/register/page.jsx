@@ -1,6 +1,7 @@
 "use client"
 import React, { useState } from "react";
-import Link from "next/link"; // If using Next.js; otherwise, use <a> tags
+import Link from "next/link";
+import Navbar from "@/components/Navbar"
 
 const Signup = () => {
   const [name, setName] = useState("");
@@ -19,12 +20,13 @@ const Signup = () => {
       setError("Passwords do not match.");
       return;
     }
-    // Simulate signup logic (replace with actual API call)
     console.log("Signing up with:", { name, email, password });
-    setError(""); // Clear error on successful submission
+    setError(""); 
   };
 
   return (
+    <>
+    <Navbar/>
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
         <div className="mb-6 text-center">
@@ -61,7 +63,7 @@ const Signup = () => {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              className="text-black w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               placeholder="Enter your name"
             />
           </div>
@@ -71,7 +73,7 @@ const Signup = () => {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              className="text-black w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               placeholder="Enter your email"
             />
           </div>
@@ -81,7 +83,7 @@ const Signup = () => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              className="text-black w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               placeholder="Enter your password"
             />
           </div>
@@ -91,7 +93,7 @@ const Signup = () => {
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              className="text-black w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
               placeholder="Confirm your password"
             />
           </div>
@@ -111,6 +113,7 @@ const Signup = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 
