@@ -18,7 +18,8 @@ const Canva = () => {
   const [pagesData, setPagesData] = useState(null);
   const [columns, setColumns] = useState([]);
   const [rows, setRows] = useState([]);
-  const [isShapeDragging, setIsShapeDragging] = useState(false); // Track shape dragging
+  const [showColumnMapping, setShowColumnMapping] = useState(false); // New state for column mapping
+  const [columnMapping, setColumnMapping] = useState({}); // Store column mappings
 
   const stageRef = useRef(null);
   const transformerRef = useRef(null);
@@ -77,6 +78,7 @@ const Canva = () => {
             fill: t.fill || "#000",
             draggable: true,
             dataField: null,
+            zIndex: idCounter,
           });
         }
       });
@@ -96,6 +98,7 @@ const Canva = () => {
           image: img,
           draggable: true,
           dataField: null,
+          zIndex: idCounter,
         });
       });
 
@@ -114,10 +117,13 @@ const Canva = () => {
             strokeWidth: sh.strokeWidth || 1,
             draggable: true,
             dataField: null,
+            zIndex: idCounter,
           });
         }
       });
 
+      // Sort by z-index
+      newShapes.sort((a, b) => a.zIndex - b.zIndex);
       setShapes(newShapes);
       setPdfUploaded(true);
     } catch (error) {
@@ -142,8 +148,28 @@ const Canva = () => {
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
       setColumns(jsonData[0] || []);
       setRows(jsonData.slice(1));
+      setShowColumnMapping(true); // Show column mapping interface
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  // =========================
+  // Column Mapping
+  // =========================
+  const handleMappingChange = (shapeId, columnName) => {
+    setColumnMapping(prev => ({
+      ...prev,
+      [shapeId]: columnName
+    }));
+  };
+
+  const saveColumnMapping = () => {
+    // Apply mappings to shapes
+    setShapes(prev => prev.map(shape => ({
+      ...shape,
+      dataField: columnMapping[shape.id] || null
+    })));
+    setShowColumnMapping(false);
   };
 
   // =========================
@@ -211,7 +237,10 @@ const Canva = () => {
       const layer = new Konva.Layer();
       offStage.add(layer);
 
-      tempShapes.forEach((shape) => {
+      // Sort shapes by z-index before rendering
+      const sortedShapes = [...tempShapes].sort((a, b) => a.zIndex - b.zIndex);
+
+      sortedShapes.forEach((shape) => {
         let node;
         switch (shape.type) {
           case "rect":
@@ -227,7 +256,7 @@ const Canva = () => {
             node = new Konva.Path({
               x: shape.x,
               y: shape.y,
-              data: shape.data,
+            data: shape.data,
               fill: shape.fill,
               stroke: shape.stroke,
               strokeWidth: shape.strokeWidth,
@@ -260,7 +289,7 @@ const Canva = () => {
   // Shape Selection & Transformer
   // =========================
   const handleSelect = (e) => {
-    e.evt.stopPropagation(); // Prevent stage from capturing the click
+    e.evt.stopPropagation();
     const id = e.target.id();
     setSelectedId(id);
   };
@@ -282,7 +311,7 @@ const Canva = () => {
     }
   }, [selectedId, shapes]);
 
-  const handleStageClick = (e) => {
+  const handleStageMouseDown = (e) => {
     if (e.target === stageRef.current) {
       setSelectedId(null);
     }
@@ -314,7 +343,15 @@ const Canva = () => {
     setStagePos(newPos);
   };
 
-  const handleDragEnd = (e) => {
+  const handleStageDragStart = (e) => {
+    // Allow stage drag only when clicking on empty space
+    if (selectedId) {
+      e.evt.stopPropagation();
+      e.cancelBubble = true;
+    }
+  };
+
+  const handleStageDragEnd = (e) => {
     setStagePos({
       x: e.target.x(),
       y: e.target.y(),
@@ -325,12 +362,11 @@ const Canva = () => {
   // Shape Drag Handlers
   // =========================
   const handleShapeDragStart = (e) => {
-    e.evt.stopPropagation(); // Prevent stage drag
-    setIsShapeDragging(true); // Disable stage dragging
+    e.evt.stopPropagation();
   };
 
   const handleShapeDragEnd = (e) => {
-    setIsShapeDragging(false); // Re-enable stage dragging if needed
+    e.evt.stopPropagation();
     setShapes((prev) =>
       prev.map((s) =>
         s.id === e.target.id() ? { ...s, x: e.target.x(), y: e.target.y() } : s
@@ -353,6 +389,7 @@ const Canva = () => {
       fill: "#ff4d4f",
       draggable: true,
       dataField: null,
+      zIndex: shapes.length + 1,
     };
     setShapes((prev) => [...prev, newShape]);
     setSelectedId(newShape.id);
@@ -370,6 +407,7 @@ const Canva = () => {
       fill: "#333",
       draggable: true,
       dataField: null,
+      zIndex: shapes.length + 1,
     };
     setShapes((prev) => [...prev, newShape]);
     setSelectedId(newShape.id);
@@ -397,6 +435,7 @@ const Canva = () => {
           image: img,
           draggable: true,
           dataField: null,
+          zIndex: shapes.length + 1,
         };
         setShapes((prev) => [...prev, newShape]);
         setSelectedId(newShape.id);
@@ -424,6 +463,73 @@ const Canva = () => {
           : shape
       )
     );
+  };
+
+  // =========================
+  // Z-Index Management
+  // =========================
+  const moveToFront = () => {
+    setShapes(prev => {
+      const newShapes = [...prev];
+      const selectedIndex = newShapes.findIndex(s => s.id === selectedId);
+      if (selectedIndex !== -1) {
+        const [movedShape] = newShapes.splice(selectedIndex, 1);
+        newShapes.push({...movedShape, zIndex: newShapes.length + 1});
+        return newShapes;
+      }
+      return prev;
+    });
+  };
+
+  const moveToBack = () => {
+    setShapes(prev => {
+      const newShapes = [...prev];
+      const selectedIndex = newShapes.findIndex(s => s.id === selectedId);
+      if (selectedIndex !== -1) {
+        const [movedShape] = newShapes.splice(selectedIndex, 1);
+        newShapes.unshift({...movedShape, zIndex: 0});
+        // Reassign z-indices
+        return newShapes.map((shape, index) => ({
+          ...shape,
+          zIndex: index
+        }));
+      }
+      return prev;
+    });
+  };
+
+  const moveUp = () => {
+    setShapes(prev => {
+      const newShapes = [...prev];
+      const selectedIndex = newShapes.findIndex(s => s.id === selectedId);
+      if (selectedIndex > 0) {
+        [newShapes[selectedIndex - 1], newShapes[selectedIndex]] = 
+        [newShapes[selectedIndex], newShapes[selectedIndex - 1]];
+        // Reassign z-indices
+        return newShapes.map((shape, index) => ({
+          ...shape,
+          zIndex: index
+        }));
+      }
+      return prev;
+    });
+  };
+
+  const moveDown = () => {
+    setShapes(prev => {
+      const newShapes = [...prev];
+      const selectedIndex = newShapes.findIndex(s => s.id === selectedId);
+      if (selectedIndex < newShapes.length - 1) {
+        [newShapes[selectedIndex], newShapes[selectedIndex + 1]] = 
+        [newShapes[selectedIndex + 1], newShapes[selectedIndex]];
+        // Reassign z-indices
+        return newShapes.map((shape, index) => ({
+          ...shape,
+          zIndex: index
+        }));
+      }
+      return prev;
+    });
   };
 
   const selectedShape = shapes.find((shape) => shape.id === selectedId);
@@ -454,12 +560,68 @@ const Canva = () => {
     );
   }
 
+  // Column Mapping Interface
+  if (showColumnMapping) {
+    return (
+      <div className="flex h-screen bg-gray-50">
+        <div className="flex-1 p-8">
+          <h1 className="text-2xl font-bold mb-6">Map Excel Columns to Objects</h1>
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <h2 className="text-xl font-semibold mb-4">Excel Columns</h2>
+                <ul className="space-y-2">
+                  {columns.map((col, index) => (
+                    <li key={index} className="p-3 bg-gray-100 rounded">
+                      {col}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold mb-4">Canvas Objects</h2>
+                <div className="space-y-4">
+                  {shapes.map((shape) => (
+                    <div key={shape.id} className="p-3 bg-white border rounded">
+                      <div className="font-medium">{shape.name}</div>
+                      <div className="mt-2">
+                        <label className="block text-sm text-gray-600 mb-1">Map to column:</label>
+                        <select
+                          value={columnMapping[shape.id] || ""}
+                          onChange={(e) => handleMappingChange(shape.id, e.target.value)}
+                          className="w-full p-2 border rounded"
+                        >
+                          <option value="">Select column</option>
+                          {columns.map((col) => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-8 flex justify-end">
+              <button
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
+                onClick={saveColumnMapping}
+              >
+                Save Mapping
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         {/* Toolbar */}
-        <div className="p-3 bg-white shadow flex gap-3 items-center">
+        <div className="p-3 bg-white shadow flex gap-3 items-center flex-wrap">
           <button
             className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
             onClick={addRectangle}
@@ -504,7 +666,7 @@ const Canva = () => {
           >
             Generate PNGs
           </button>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex gap-2 flex-wrap">
             <button
               className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow hover:bg-gray-700 transition"
               onClick={() => {
@@ -557,10 +719,11 @@ const Canva = () => {
             scaleY={scale}
             x={stagePos.x}
             y={stagePos.y}
-            draggable={!selectedId && !isShapeDragging} // Disable stage drag during shape drag
-            onDragEnd={handleDragEnd}
+            draggable={true}
+            onDragStart={handleStageDragStart}
+            onDragEnd={handleStageDragEnd}
             ref={stageRef}
-            onMouseDown={handleStageClick}
+            onMouseDown={handleStageMouseDown}
             onWheel={handleWheel}
             style={{ backgroundColor: "#e5e7eb" }}
           >
@@ -574,6 +737,7 @@ const Canva = () => {
                 fill="#f9fafb"
                 stroke="#000"
                 strokeWidth={1 / scale}
+                listening={false}
               />
 
               {/* Grid */}
@@ -583,6 +747,7 @@ const Canva = () => {
                   points={[i * 50, 0, i * 50, canvasHeight]}
                   stroke="#eee"
                   strokeWidth={1 / scale}
+                  listening={false}
                 />
               ))}
               {Array.from({ length: Math.ceil(canvasHeight / 50) }).map((_, i) => (
@@ -591,120 +756,126 @@ const Canva = () => {
                   points={[0, i * 50, canvasWidth, i * 50]}
                   stroke="#eee"
                   strokeWidth={1 / scale}
+                  listening={false}
                 />
               ))}
 
-              {/* Shapes */}
-              {shapes.map((shape) => {
-                if (shape.type === "rect")
-                  return (
-                    <Rect
-                      key={shape.id}
-                      id={shape.id}
-                      {...shape}
-                      onClick={handleSelect}
-                      onMouseDown={handleSelect}
-                      onDragStart={handleShapeDragStart}
-                      onDragEnd={handleShapeDragEnd}
-                      onTransformEnd={(e) => {
-                        const node = e.target;
-                        setShapes((prev) =>
-                          prev.map((s) =>
-                            s.id === shape.id
-                              ? {
-                                  ...s,
-                                  x: node.x(),
-                                  y: node.y(),
-                                  width: Math.max(10, node.width() * node.scaleX()),
-                                  height: Math.max(10, node.height() * node.scaleY()),
-                                }
-                              : s
-                          )
-                        );
-                        node.scaleX(1);
-                        node.scaleY(1);
-                      }}
-                    />
-                  );
-                else if (shape.type === "text")
-                  return (
-                    <Text
-                      key={shape.id}
-                      id={shape.id}
-                      {...shape}
-                      onClick={handleSelect}
-                      onMouseDown={handleSelect}
-                      onDragStart={handleShapeDragStart}
-                      onDragEnd={handleShapeDragEnd}
-                      onTransformEnd={(e) => {
-                        const node = e.target;
-                        setShapes((prev) =>
-                          prev.map((s) =>
-                            s.id === shape.id
-                              ? {
-                                  ...s,
-                                  x: node.x(),
-                                  y: node.y(),
-                                  fontSize: Math.max(10, node.fontSize() * node.scaleX()),
-                                }
-                              : s
-                          )
-                        );
-                        node.scaleX(1);
-                        node.scaleY(1);
-                      }}
-                    />
-                  );
-                else if (shape.type === "image")
-                  return (
-                    <KonvaImage
-                      key={shape.id}
-                      id={shape.id}
-                      {...shape}
-                      onClick={handleSelect}
-                      onMouseDown={handleSelect}
-                      onDragStart={handleShapeDragStart}
-                      onDragEnd={handleShapeDragEnd}
-                      onTransformEnd={(e) => {
-                        const node = e.target;
-                        setShapes((prev) =>
-                          prev.map((s) =>
-                            s.id === shape.id
-                              ? {
-                                  ...s,
-                                  x: node.x(),
-                                  y: node.y(),
-                                  width: Math.max(10, node.width() * node.scaleX()),
-                                  height: Math.max(10, node.height() * node.scaleY()),
-                                }
-                              : s
-                          )
-                        );
-                        node.scaleX(1);
-                        node.scaleY(1);
-                      }}
-                    />
-                  );
-                else if (shape.type === "path")
-                  return (
-                    <Path
-                      key={shape.id}
-                      id={shape.id}
-                      x={shape.x}
-                      y={shape.y}
-                      data={shape.data}
-                      fill={shape.fill}
-                      stroke={shape.stroke}
-                      strokeWidth={shape.strokeWidth}
-                      onClick={handleSelect}
-                      onMouseDown={handleSelect}
-                      draggable={shape.draggable}
-                      onDragStart={handleShapeDragStart}
-                      onDragEnd={handleShapeDragEnd}
-                    />
-                  );
-                return null;
-              })}
+              {/* Shapes - sorted by z-index */}
+              {[...shapes]
+                .sort((a, b) => a.zIndex - b.zIndex)
+                .map((shape) => {
+                  if (shape.type === "rect")
+                    return (
+                      <Rect
+                        key={shape.id}
+                        id={shape.id}
+                        {...shape}
+                        onClick={handleSelect}
+                        onMouseDown={handleSelect}
+                        onDragStart={handleShapeDragStart}
+                        onDragEnd={handleShapeDragEnd}
+                        onTransformEnd={(e) => {
+                          e.evt.stopPropagation();
+                          const node = e.target;
+                          setShapes((prev) =>
+                            prev.map((s) =>
+                              s.id === shape.id
+                                ? {
+                                    ...s,
+                                    x: node.x(),
+                                    y: node.y(),
+                                    width: Math.max(10, node.width() * node.scaleX()),
+                                    height: Math.max(10, node.height() * node.scaleY()),
+                                  }
+                                : s
+                            )
+                          );
+                          node.scaleX(1);
+                          node.scaleY(1);
+                        }}
+                      />
+                    );
+                  else if (shape.type === "text")
+                    return (
+                      <Text
+                        key={shape.id}
+                        id={shape.id}
+                        {...shape}
+                        onClick={handleSelect}
+                        onMouseDown={handleSelect}
+                        onDragStart={handleShapeDragStart}
+                        onDragEnd={handleShapeDragEnd}
+                        onTransformEnd={(e) => {
+                          e.evt.stopPropagation();
+                          const node = e.target;
+                          setShapes((prev) =>
+                            prev.map((s) =>
+                              s.id === shape.id
+                                ? {
+                                    ...s,
+                                    x: node.x(),
+                                    y: node.y(),
+                                    fontSize: Math.max(10, node.fontSize() * node.scaleX()),
+                                  }
+                                : s
+                            )
+                          );
+                          node.scaleX(1);
+                          node.scaleY(1);
+                        }}
+                      />
+                    );
+                  else if (shape.type === "image")
+                    return (
+                      <KonvaImage
+                        key={shape.id}
+                        id={shape.id}
+                        {...shape}
+                        onClick={handleSelect}
+                        onMouseDown={handleSelect}
+                        onDragStart={handleShapeDragStart}
+                        onDragEnd={handleShapeDragEnd}
+                        onTransformEnd={(e) => {
+                          e.evt.stopPropagation();
+                          const node = e.target;
+                          setShapes((prev) =>
+                            prev.map((s) =>
+                              s.id === shape.id
+                                ? {
+                                    ...s,
+                                    x: node.x(),
+                                    y: node.y(),
+                                    width: Math.max(10, node.width() * node.scaleX()),
+                                    height: Math.max(10, node.height() * node.scaleY()),
+                                  }
+                                : s
+                            )
+                          );
+                          node.scaleX(1);
+                          node.scaleY(1);
+                        }}
+                      />
+                    );
+                  else if (shape.type === "path")
+                    return (
+                      <Path
+                        key={shape.id}
+                        id={shape.id}
+                        x={shape.x}
+                        y={shape.y}
+                        data={shape.data}
+                        fill={shape.fill}
+                        stroke={shape.stroke}
+                        strokeWidth={shape.strokeWidth}
+                        onClick={handleSelect}
+                        onMouseDown={handleSelect}
+                        draggable={shape.draggable}
+                        onDragStart={handleShapeDragStart}
+                        onDragEnd={handleShapeDragEnd}
+                      />
+                    );
+                  return null;
+                })}
               <Transformer
                 ref={transformerRef}
                 boundBoxFunc={(oldBox, newBox) => ({
@@ -727,6 +898,38 @@ const Canva = () => {
         {selectedShape && (
           <div className="space-y-5">
             <h2 className="text-2xl font-semibold text-gray-800 mb-3">Edit Properties</h2>
+            
+            {/* Z-Index Controls */}
+            <div className="border-b pb-3">
+              <label className="block text-gray-600 mb-2">Z-Index</label>
+              <div className="flex gap-2">
+                <button 
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                  onClick={moveToFront}
+                >
+                  To Front
+                </button>
+                <button 
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                  onClick={moveToBack}
+                >
+                  To Back
+                </button>
+                <button 
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                  onClick={moveUp}
+                >
+                  Up
+                </button>
+                <button 
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
+                  onClick={moveDown}
+                >
+                  Down
+                </button>
+              </div>
+            </div>
+
             <div>
               <label className="block text-gray-600 mb-1">Name</label>
               <input
@@ -736,24 +939,6 @@ const Canva = () => {
                 className="w-full p-2 border rounded-lg"
               />
             </div>
-
-            {(selectedShape.type === "text" || selectedShape.type === "image") && columns.length > 0 && (
-              <div>
-                <label className="block text-gray-600 mb-1">Map to Excel Column</label>
-                <select
-                  value={selectedShape.dataField || ""}
-                  onChange={(e) => updateShapeProperty("dataField", e.target.value)}
-                  className="w-full p-2 border rounded-lg"
-                >
-                  <option value="">None</option>
-                  {columns.map((col) => (
-                    <option key={col} value={col}>
-                      {col}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             {selectedShape.type === "rect" && (
               <>
