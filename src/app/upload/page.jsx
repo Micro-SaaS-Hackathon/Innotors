@@ -1,73 +1,266 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Stage, Layer, Rect, Text, Transformer, Image as KonvaImage, Line } from "react-konva";
+import { Stage, Layer, Rect, Text, Transformer, Image as KonvaImage, Line, Path } from "react-konva";
+import Konva from "konva";
+import * as XLSX from "xlsx";
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
 
-const Canva = ({ excelData }) => {
+const Canva = () => {
   const [shapes, setShapes] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [scale, setScale] = useState(1);
   const [stagePos, setStagePos] = useState({ x: 0, y: 0 });
+  const [canvasWidth, setCanvasWidth] = useState(1000);
+  const [canvasHeight, setCanvasHeight] = useState(600);
+  const [pdfUploaded, setPdfUploaded] = useState(false);
+  const [pagesData, setPagesData] = useState(null);
+  const [columns, setColumns] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [isShapeDragging, setIsShapeDragging] = useState(false); // Track shape dragging
 
   const stageRef = useRef(null);
   const transformerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const pdfInputRef = useRef(null);
+  const excelInputRef = useRef(null);
 
-  const canvasWidth = 1000;
-  const canvasHeight = 600;
   const stageWidth = window.innerWidth - (selectedId ? 300 : 0);
   const stageHeight = window.innerHeight - 70;
 
   // =========================
-  // Initialize Shapes from Excel Data
+  // PDF Upload and Parsing
   // =========================
-  useEffect(() => {
-    if (excelData && excelData.length > 0) {
-      const newShapes = excelData.map((row) => {
-        const baseShape = {
-          id: row.id || `shape${shapes.length + 1}`,
-          type: row.type,
-          name: row.name || `Shape_${shapes.length + 1}`,
-          x: parseFloat(row.x) || 50,
-          y: parseFloat(row.y) || 50,
-          draggable: true,
-        };
+  const handlePdfUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      console.error("No file selected");
+      setPdfUploaded(false);
+      return;
+    }
 
-        if (row.type === "rect") {
-          return {
-            ...baseShape,
-            width: parseFloat(row.width) || 120,
-            height: parseFloat(row.height) || 100,
-            fill: row.fill || "#ff4d4f",
-          };
-        } else if (row.type === "text") {
-          return {
-            ...baseShape,
-            text: row.text || "Text",
-            fontSize: parseInt(row.fontSize) || 22,
-            fill: row.fill || "#333",
-          };
-        } else if (row.type === "image" && row.imageUrl) {
-          const img = new window.Image();
-          img.src = row.imageUrl;
-          return {
-            ...baseShape,
-            width: parseFloat(row.width) || 120,
-            height: parseFloat(row.height) || 120,
-            image: img,
-          };
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("http://localhost:8000/extract", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP error! Status: ${res.status}, Message: ${errorText}`);
+      }
+      const data = await res.json();
+      setPagesData(data.pages);
+
+      // Assume first page for simplicity
+      const page = data.pages[0];
+      setCanvasWidth(page.width);
+      setCanvasHeight(page.height);
+
+      const newShapes = [];
+      let idCounter = 1;
+
+      // Texts
+      page.texts.forEach((t) => {
+        if (t.text) {
+          newShapes.push({
+            id: `text${idCounter++}`,
+            type: "text",
+            name: t.text.slice(0, 20) || `Text_${idCounter}`,
+            x: t.bbox[0],
+            y: t.bbox[1],
+            text: t.text,
+            fontSize: t.size || 12,
+            fill: t.fill || "#000",
+            draggable: true,
+            dataField: null,
+          });
         }
-        return null;
-      }).filter(Boolean);
+      });
+
+      // Images
+      page.images.forEach((im) => {
+        const img = new window.Image();
+        img.src = im.image_url;
+        newShapes.push({
+          id: `image${idCounter++}`,
+          type: "image",
+          name: `Image_${idCounter}`,
+          x: im.bbox[0],
+          y: im.bbox[1],
+          width: im.bbox[2] - im.bbox[0],
+          height: im.bbox[3] - im.bbox[1],
+          image: img,
+          draggable: true,
+          dataField: null,
+        });
+      });
+
+      // Shapes (paths)
+      page.shapes.forEach((sh) => {
+        if (sh.path_data) {
+          newShapes.push({
+            id: `path${idCounter++}`,
+            type: "path",
+            name: `Path_${idCounter}`,
+            x: 0,
+            y: 0,
+            data: sh.path_data,
+            fill: sh.fill,
+            stroke: sh.stroke,
+            strokeWidth: sh.strokeWidth || 1,
+            draggable: true,
+            dataField: null,
+          });
+        }
+      });
 
       setShapes(newShapes);
+      setPdfUploaded(true);
+    } catch (error) {
+      console.error("Fetch error:", error.message);
+      setPdfUploaded(false);
     }
-  }, [excelData]);
+  };
+
+  // =========================
+  // Excel Upload and Parsing
+  // =========================
+  const handleExcelUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const data = event.target.result;
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+      setColumns(jsonData[0] || []);
+      setRows(jsonData.slice(1));
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // =========================
+  // Generate PNGs
+  // =========================
+  const cloneShapes = (shapes) => {
+    return shapes.map((shape) => {
+      const cloned = { ...shape };
+      if (shape.image) {
+        const img = new window.Image();
+        img.src = shape.image.src;
+        cloned.image = img;
+      }
+      return cloned;
+    });
+  };
+
+  const handleGenerate = async () => {
+    if (rows.length === 0) {
+      alert("Please upload an Excel file first.");
+      return;
+    }
+
+    const dataURLs = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const tempShapes = cloneShapes(shapes);
+      const promises = [];
+
+      tempShapes.forEach((shape) => {
+        if (shape.dataField) {
+          const colIndex = columns.indexOf(shape.dataField);
+          if (colIndex !== -1) {
+            const value = row[colIndex];
+            if (shape.type === "text") {
+              shape.text = value ? value.toString() : "";
+            } else if (shape.type === "image" && value) {
+              promises.push(
+                new Promise((resolve, reject) => {
+                  const img = new window.Image();
+                  img.onload = () => {
+                    shape.image = img;
+                    resolve();
+                  };
+                  img.onerror = reject;
+                  img.src = value;
+                })
+              );
+            }
+          }
+        }
+      });
+
+      await Promise.all(promises);
+
+      // Create offscreen Konva stage
+      const div = document.createElement("div");
+      document.body.appendChild(div);
+      const offStage = new Konva.Stage({
+        container: div,
+        width: canvasWidth,
+        height: canvasHeight,
+      });
+      const layer = new Konva.Layer();
+      offStage.add(layer);
+
+      tempShapes.forEach((shape) => {
+        let node;
+        switch (shape.type) {
+          case "rect":
+            node = new Konva.Rect(shape);
+            break;
+          case "text":
+            node = new Konva.Text(shape);
+            break;
+          case "image":
+            node = new Konva.Image(shape);
+            break;
+          case "path":
+            node = new Konva.Path({
+              x: shape.x,
+              y: shape.y,
+              data: shape.data,
+              fill: shape.fill,
+              stroke: shape.stroke,
+              strokeWidth: shape.strokeWidth,
+            });
+            break;
+          default:
+            break;
+        }
+        if (node) layer.add(node);
+      });
+
+      layer.draw();
+      const dataURL = offStage.toDataURL({ mimeType: "image/png", pixelRatio: 2 });
+      dataURLs.push(dataURL);
+      offStage.destroy();
+      document.body.removeChild(div);
+    }
+
+    // Zip and download
+    const zip = new JSZip();
+    dataURLs.forEach((url, i) => {
+      const base64Data = url.split(",")[1];
+      zip.file(`design_${i + 1}.png`, base64Data, { base64: true });
+    });
+    const blob = await zip.generateAsync({ type: "blob" });
+    saveAs(blob, "designs.zip");
+  };
 
   // =========================
   // Shape Selection & Transformer
   // =========================
   const handleSelect = (e) => {
+    e.evt.stopPropagation(); // Prevent stage from capturing the click
     const id = e.target.id();
     setSelectedId(id);
   };
@@ -75,21 +268,24 @@ const Canva = ({ excelData }) => {
   useEffect(() => {
     if (selectedId && transformerRef.current) {
       const node = stageRef.current.findOne(`#${selectedId}`);
-      if (node) {
+      const selectedShape = shapes.find((s) => s.id === selectedId);
+      if (node && selectedShape.type !== "path") {
         transformerRef.current.nodes([node]);
+        transformerRef.current.getLayer().batchDraw();
+      } else {
+        transformerRef.current.nodes([]);
         transformerRef.current.getLayer().batchDraw();
       }
     } else if (transformerRef.current) {
       transformerRef.current.nodes([]);
       transformerRef.current.getLayer().batchDraw();
     }
-  }, [selectedId]);
+  }, [selectedId, shapes]);
 
   const handleStageClick = (e) => {
     if (e.target === stageRef.current) {
-      
+      setSelectedId(null);
     }
-    setSelectedId(null);
   };
 
   // =========================
@@ -126,7 +322,24 @@ const Canva = ({ excelData }) => {
   };
 
   // =========================
-  // Adding Shapes (for manual testing)
+  // Shape Drag Handlers
+  // =========================
+  const handleShapeDragStart = (e) => {
+    e.evt.stopPropagation(); // Prevent stage drag
+    setIsShapeDragging(true); // Disable stage dragging
+  };
+
+  const handleShapeDragEnd = (e) => {
+    setIsShapeDragging(false); // Re-enable stage dragging if needed
+    setShapes((prev) =>
+      prev.map((s) =>
+        s.id === e.target.id() ? { ...s, x: e.target.x(), y: e.target.y() } : s
+      )
+    );
+  };
+
+  // =========================
+  // Adding Shapes (manual)
   // =========================
   const addRectangle = () => {
     const newShape = {
@@ -139,6 +352,7 @@ const Canva = ({ excelData }) => {
       height: 100,
       fill: "#ff4d4f",
       draggable: true,
+      dataField: null,
     };
     setShapes((prev) => [...prev, newShape]);
     setSelectedId(newShape.id);
@@ -155,6 +369,7 @@ const Canva = ({ excelData }) => {
       fontSize: 22,
       fill: "#333",
       draggable: true,
+      dataField: null,
     };
     setShapes((prev) => [...prev, newShape]);
     setSelectedId(newShape.id);
@@ -162,9 +377,6 @@ const Canva = ({ excelData }) => {
 
   const addImage = () => fileInputRef.current.click();
 
-  // =========================
-  // Image Upload
-  // =========================
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -184,6 +396,7 @@ const Canva = ({ excelData }) => {
           height: 120,
           image: img,
           draggable: true,
+          dataField: null,
         };
         setShapes((prev) => [...prev, newShape]);
         setSelectedId(newShape.id);
@@ -202,8 +415,10 @@ const Canva = ({ excelData }) => {
           ? {
               ...shape,
               [property]:
-                property === "width" || property === "height" || property === "fontSize"
-                  ? Math.max(10, parseInt(value) || 10)
+                property === "width" || property === "height" || property === "fontSize" || property === "strokeWidth"
+                  ? Math.max(0.1, parseFloat(value) || 0.1)
+                  : property === "dataField"
+                  ? value || null
                   : value,
             }
           : shape
@@ -216,6 +431,29 @@ const Canva = ({ excelData }) => {
   // =========================
   // Render
   // =========================
+  if (!pdfUploaded) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Upload PDF Template</h1>
+          <input
+            type="file"
+            accept=".pdf"
+            ref={pdfInputRef}
+            className="hidden"
+            onChange={handlePdfUpload}
+          />
+          <button
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
+            onClick={() => pdfInputRef.current.click()}
+          >
+            Upload PDF
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Main Content */}
@@ -247,6 +485,25 @@ const Canva = ({ excelData }) => {
             className="hidden"
             onChange={handleImageUpload}
           />
+          <button
+            className="px-4 py-2 bg-yellow-600 text-white rounded-lg shadow hover:bg-yellow-700 transition"
+            onClick={() => excelInputRef.current.click()}
+          >
+            Upload Excel
+          </button>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            ref={excelInputRef}
+            className="hidden"
+            onChange={handleExcelUpload}
+          />
+          <button
+            className="px-4 py-2 bg-red-600 text-white rounded-lg shadow hover:bg-red-700 transition"
+            onClick={handleGenerate}
+          >
+            Generate PNGs
+          </button>
           <div className="ml-auto flex gap-2">
             <button
               className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow hover:bg-gray-700 transition"
@@ -300,7 +557,7 @@ const Canva = ({ excelData }) => {
             scaleY={scale}
             x={stagePos.x}
             y={stagePos.y}
-            draggable={!selectedId}
+            draggable={!selectedId && !isShapeDragging} // Disable stage drag during shape drag
             onDragEnd={handleDragEnd}
             ref={stageRef}
             onMouseDown={handleStageClick}
@@ -347,15 +604,8 @@ const Canva = ({ excelData }) => {
                       {...shape}
                       onClick={handleSelect}
                       onMouseDown={handleSelect}
-                      onDragEnd={(e) =>
-                        setShapes((prev) =>
-                          prev.map((s) =>
-                            s.id === shape.id
-                              ? { ...s, x: e.target.x(), y: e.target.y() }
-                              : s
-                          )
-                        )
-                      }
+                      onDragStart={handleShapeDragStart}
+                      onDragEnd={handleShapeDragEnd}
                       onTransformEnd={(e) => {
                         const node = e.target;
                         setShapes((prev) =>
@@ -384,15 +634,8 @@ const Canva = ({ excelData }) => {
                       {...shape}
                       onClick={handleSelect}
                       onMouseDown={handleSelect}
-                      onDragEnd={(e) =>
-                        setShapes((prev) =>
-                          prev.map((s) =>
-                            s.id === shape.id
-                              ? { ...s, x: e.target.x(), y: e.target.y() }
-                              : s
-                          )
-                        )
-                      }
+                      onDragStart={handleShapeDragStart}
+                      onDragEnd={handleShapeDragEnd}
                       onTransformEnd={(e) => {
                         const node = e.target;
                         setShapes((prev) =>
@@ -420,15 +663,8 @@ const Canva = ({ excelData }) => {
                       {...shape}
                       onClick={handleSelect}
                       onMouseDown={handleSelect}
-                      onDragEnd={(e) =>
-                        setShapes((prev) =>
-                          prev.map((s) =>
-                            s.id === shape.id
-                              ? { ...s, x: e.target.x(), y: e.target.y() }
-                              : s
-                          )
-                        )
-                      }
+                      onDragStart={handleShapeDragStart}
+                      onDragEnd={handleShapeDragEnd}
                       onTransformEnd={(e) => {
                         const node = e.target;
                         setShapes((prev) =>
@@ -447,6 +683,24 @@ const Canva = ({ excelData }) => {
                         node.scaleX(1);
                         node.scaleY(1);
                       }}
+                    />
+                  );
+                else if (shape.type === "path")
+                  return (
+                    <Path
+                      key={shape.id}
+                      id={shape.id}
+                      x={shape.x}
+                      y={shape.y}
+                      data={shape.data}
+                      fill={shape.fill}
+                      stroke={shape.stroke}
+                      strokeWidth={shape.strokeWidth}
+                      onClick={handleSelect}
+                      onMouseDown={handleSelect}
+                      draggable={shape.draggable}
+                      onDragStart={handleShapeDragStart}
+                      onDragEnd={handleShapeDragEnd}
                     />
                   );
                 return null;
@@ -483,6 +737,24 @@ const Canva = ({ excelData }) => {
               />
             </div>
 
+            {(selectedShape.type === "text" || selectedShape.type === "image") && columns.length > 0 && (
+              <div>
+                <label className="block text-gray-600 mb-1">Map to Excel Column</label>
+                <select
+                  value={selectedShape.dataField || ""}
+                  onChange={(e) => updateShapeProperty("dataField", e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                >
+                  <option value="">None</option>
+                  {columns.map((col) => (
+                    <option key={col} value={col}>
+                      {col}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {selectedShape.type === "rect" && (
               <>
                 <div>
@@ -499,9 +771,7 @@ const Canva = ({ excelData }) => {
                   <input
                     type="number"
                     value={selectedShape.width}
-                    onChange={(e) =>
-                      updateShapeProperty("width", Math.max(10, parseInt(e.target.value)))
-                    }
+                    onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
                     className="w-full p-2 border rounded-lg"
                   />
                 </div>
@@ -510,9 +780,7 @@ const Canva = ({ excelData }) => {
                   <input
                     type="number"
                     value={selectedShape.height}
-                    onChange={(e) =>
-                      updateShapeProperty("height", Math.max(10, parseInt(e.target.value)))
-                    }
+                    onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
                     className="w-full p-2 border rounded-lg"
                   />
                 </div>
@@ -535,9 +803,7 @@ const Canva = ({ excelData }) => {
                   <input
                     type="number"
                     value={selectedShape.fontSize}
-                    onChange={(e) =>
-                      updateShapeProperty("fontSize", Math.max(10, parseInt(e.target.value)))
-                    }
+                    onChange={(e) => updateShapeProperty("fontSize", parseInt(e.target.value))}
                     className="w-full p-2 border rounded-lg"
                   />
                 </div>
@@ -560,9 +826,7 @@ const Canva = ({ excelData }) => {
                   <input
                     type="number"
                     value={selectedShape.width}
-                    onChange={(e) =>
-                      updateShapeProperty("width", Math.max(10, parseInt(e.target.value)))
-                    }
+                    onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
                     className="w-full p-2 border rounded-lg"
                   />
                 </div>
@@ -571,9 +835,39 @@ const Canva = ({ excelData }) => {
                   <input
                     type="number"
                     value={selectedShape.height}
-                    onChange={(e) =>
-                      updateShapeProperty("height", Math.max(10, parseInt(e.target.value)))
-                    }
+                    onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
+                    className="w-full p-2 border rounded-lg"
+                  />
+                </div>
+              </>
+            )}
+
+            {selectedShape.type === "path" && (
+              <>
+                <div>
+                  <label className="block text-gray-600 mb-1">Fill Color</label>
+                  <input
+                    type="color"
+                    value={selectedShape.fill || "#000000"}
+                    onChange={(e) => updateShapeProperty("fill", e.target.value || null)}
+                    className="w-full h-10 rounded-lg border"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-600 mb-1">Stroke Color</label>
+                  <input
+                    type="color"
+                    value={selectedShape.stroke || "#000000"}
+                    onChange={(e) => updateShapeProperty("stroke", e.target.value || null)}
+                    className="w-full h-10 rounded-lg border"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-600 mb-1">Stroke Width</label>
+                  <input
+                    type="number"
+                    value={selectedShape.strokeWidth}
+                    onChange={(e) => updateShapeProperty("strokeWidth", parseFloat(e.target.value))}
                     className="w-full p-2 border rounded-lg"
                   />
                 </div>
