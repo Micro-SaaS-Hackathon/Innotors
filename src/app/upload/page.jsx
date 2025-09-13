@@ -18,8 +18,9 @@ const Canva = () => {
   const [pagesData, setPagesData] = useState(null);
   const [columns, setColumns] = useState([]);
   const [rows, setRows] = useState([]);
-  const [showColumnMapping, setShowColumnMapping] = useState(false); // New state for column mapping
-  const [columnMapping, setColumnMapping] = useState({}); // Store column mappings
+  const [showColumnMapping, setShowColumnMapping] = useState(false);
+  const [columnMapping, setColumnMapping] = useState({});
+  const [showBlankTemplate, setShowBlankTemplate] = useState(false); // New state for blank template
 
   const stageRef = useRef(null);
   const transformerRef = useRef(null);
@@ -29,6 +30,21 @@ const Canva = () => {
 
   const stageWidth = window.innerWidth - (selectedId ? 300 : 0);
   const stageHeight = window.innerHeight - 70;
+
+  // =========================
+  // Blank Template Creation
+  // =========================
+  const handleCreateBlankTemplate = () => {
+    setShowBlankTemplate(true);
+  };
+
+  const createBlankTemplate = (width, height) => {
+    setCanvasWidth(width);
+    setCanvasHeight(height);
+    setShapes([]);
+    setPdfUploaded(true);
+    setShowBlankTemplate(false);
+  };
 
   // =========================
   // PDF Upload and Parsing
@@ -56,7 +72,6 @@ const Canva = () => {
       const data = await res.json();
       setPagesData(data.pages);
 
-      // Assume first page for simplicity
       const page = data.pages[0];
       setCanvasWidth(page.width);
       setCanvasHeight(page.height);
@@ -64,7 +79,6 @@ const Canva = () => {
       const newShapes = [];
       let idCounter = 1;
 
-      // Texts
       page.texts.forEach((t) => {
         if (t.text) {
           newShapes.push({
@@ -83,7 +97,6 @@ const Canva = () => {
         }
       });
 
-      // Images
       page.images.forEach((im) => {
         const img = new window.Image();
         img.src = im.image_url;
@@ -102,7 +115,6 @@ const Canva = () => {
         });
       });
 
-      // Shapes (paths)
       page.shapes.forEach((sh) => {
         if (sh.path_data) {
           newShapes.push({
@@ -122,7 +134,6 @@ const Canva = () => {
         }
       });
 
-      // Sort by z-index
       newShapes.sort((a, b) => a.zIndex - b.zIndex);
       setShapes(newShapes);
       setPdfUploaded(true);
@@ -148,7 +159,7 @@ const Canva = () => {
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
       setColumns(jsonData[0] || []);
       setRows(jsonData.slice(1));
-      setShowColumnMapping(true); // Show column mapping interface
+      setShowColumnMapping(true);
     };
     reader.readAsArrayBuffer(file);
   };
@@ -164,11 +175,15 @@ const Canva = () => {
   };
 
   const saveColumnMapping = () => {
-    // Apply mappings to shapes
     setShapes(prev => prev.map(shape => ({
       ...shape,
       dataField: columnMapping[shape.id] || null
     })));
+    setShowColumnMapping(false);
+  };
+
+  const cancelColumnMapping = () => {
+    setColumnMapping({});
     setShowColumnMapping(false);
   };
 
@@ -226,7 +241,6 @@ const Canva = () => {
 
       await Promise.all(promises);
 
-      // Create offscreen Konva stage
       const div = document.createElement("div");
       document.body.appendChild(div);
       const offStage = new Konva.Stage({
@@ -237,7 +251,6 @@ const Canva = () => {
       const layer = new Konva.Layer();
       offStage.add(layer);
 
-      // Sort shapes by z-index before rendering
       const sortedShapes = [...tempShapes].sort((a, b) => a.zIndex - b.zIndex);
 
       sortedShapes.forEach((shape) => {
@@ -256,7 +269,7 @@ const Canva = () => {
             node = new Konva.Path({
               x: shape.x,
               y: shape.y,
-            data: shape.data,
+               data: shape.data,
               fill: shape.fill,
               stroke: shape.stroke,
               strokeWidth: shape.strokeWidth,
@@ -275,7 +288,6 @@ const Canva = () => {
       document.body.removeChild(div);
     }
 
-    // Zip and download
     const zip = new JSZip();
     dataURLs.forEach((url, i) => {
       const base64Data = url.split(",")[1];
@@ -289,7 +301,6 @@ const Canva = () => {
   // Shape Selection & Transformer
   // =========================
   const handleSelect = (e) => {
-    e.evt.stopPropagation();
     const id = e.target.id();
     setSelectedId(id);
   };
@@ -346,7 +357,6 @@ const Canva = () => {
   const handleStageDragStart = (e) => {
     // Allow stage drag only when clicking on empty space
     if (selectedId) {
-      e.evt.stopPropagation();
       e.cancelBubble = true;
     }
   };
@@ -359,19 +369,41 @@ const Canva = () => {
   };
 
   // =========================
-  // Shape Drag Handlers
+  // Shape Drag Handlers (FIXED MOVEMENT)
   // =========================
-  const handleShapeDragStart = (e) => {
-    e.evt.stopPropagation();
-  };
+const handleShapeDragStart = (e) => {
+  // Prevent the stage from starting its own drag interaction immediately.
+  // This is the most critical fix.
+  e.evt.preventDefault(); // <-- Add this line
+  e.evt.stopPropagation();
 
-  const handleShapeDragEnd = (e) => {
-    e.evt.stopPropagation();
-    setShapes((prev) =>
-      prev.map((s) =>
-        s.id === e.target.id() ? { ...s, x: e.target.x(), y: e.target.y() } : s
-      )
-    );
+  // Disable stage dragging
+  if (stageRef.current) {
+    stageRef.current.draggable(false);
+  }
+};
+
+const handleShapeDragEnd = (e) => {
+  e.evt.stopPropagation();
+  setShapes((prev) =>
+    prev.map((s) =>
+      s.id === e.target.id() ? { ...s, x: e.target.x(), y: e.target.y() } : s
+    )
+  );
+  // Re-enable stage dragging after shape drag ends
+  if (stageRef.current) {
+    stageRef.current.draggable(true);
+  }
+};
+
+  // =========================
+  // Object Deletion
+  // =========================
+  const deleteSelectedShape = () => {
+    if (selectedId) {
+      setShapes(prev => prev.filter(shape => shape.id !== selectedId));
+      setSelectedId(null);
+    }
   };
 
   // =========================
@@ -386,7 +418,7 @@ const Canva = () => {
       y: 50,
       width: 120,
       height: 100,
-      fill: "#ff4d4f",
+      fill: "#3b82f6",
       draggable: true,
       dataField: null,
       zIndex: shapes.length + 1,
@@ -402,9 +434,9 @@ const Canva = () => {
       name: `Text_${shapes.length + 1}`,
       x: 60,
       y: 60,
-      text: "Text",
-      fontSize: 22,
-      fill: "#333",
+      text: "Sample Text",
+      fontSize: 20,
+      fill: "#1f2937",
       draggable: true,
       dataField: null,
       zIndex: shapes.length + 1,
@@ -488,7 +520,6 @@ const Canva = () => {
       if (selectedIndex !== -1) {
         const [movedShape] = newShapes.splice(selectedIndex, 1);
         newShapes.unshift({...movedShape, zIndex: 0});
-        // Reassign z-indices
         return newShapes.map((shape, index) => ({
           ...shape,
           zIndex: index
@@ -505,7 +536,6 @@ const Canva = () => {
       if (selectedIndex > 0) {
         [newShapes[selectedIndex - 1], newShapes[selectedIndex]] = 
         [newShapes[selectedIndex], newShapes[selectedIndex - 1]];
-        // Reassign z-indices
         return newShapes.map((shape, index) => ({
           ...shape,
           zIndex: index
@@ -522,7 +552,6 @@ const Canva = () => {
       if (selectedIndex < newShapes.length - 1) {
         [newShapes[selectedIndex], newShapes[selectedIndex + 1]] = 
         [newShapes[selectedIndex + 1], newShapes[selectedIndex]];
-        // Reassign z-indices
         return newShapes.map((shape, index) => ({
           ...shape,
           zIndex: index
@@ -537,24 +566,113 @@ const Canva = () => {
   // =========================
   // Render
   // =========================
+  if (showBlankTemplate) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full">
+          <div className="mb-6">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+            </div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">Create Blank Template</h1>
+            <p className="text-gray-600">Set your canvas dimensions</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Width (px)</label>
+              <input
+                type="number"
+                defaultValue="1000"
+                id="templateWidth"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Height (px)</label>
+              <input
+                type="number"
+                defaultValue="600"
+                id="templateHeight"
+                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            <div className="flex gap-3 pt-4">
+              <button
+                className="flex-1 py-3 px-4 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                onClick={() => setShowBlankTemplate(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="flex-1 py-3 px-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg shadow hover:from-blue-600 hover:to-indigo-700 transition-all"
+                onClick={() => {
+                  const width = parseInt(document.getElementById('templateWidth').value) || 1000;
+                  const height = parseInt(document.getElementById('templateHeight').value) || 600;
+                  createBlankTemplate(width, height);
+                }}
+              >
+                Create Template
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!pdfUploaded) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Upload PDF Template</h1>
-          <input
-            type="file"
-            accept=".pdf"
-            ref={pdfInputRef}
-            className="hidden"
-            onChange={handlePdfUpload}
-          />
-          <button
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
-            onClick={() => pdfInputRef.current.click()}
-          >
-            Upload PDF
-          </button>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          <div className="mb-6">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">PDF Template Designer</h1>
+            <p className="text-gray-600">Choose how to start your project</p>
+          </div>
+          
+          <div className="space-y-4">
+            <input
+              type="file"
+              accept=".pdf"
+              ref={pdfInputRef}
+              className="hidden"
+              onChange={handlePdfUpload}
+            />
+            <button
+              className="w-full py-3 px-6 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg shadow-md hover:from-blue-600 hover:to-indigo-700 transition-all transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 flex items-center justify-center"
+              onClick={() => pdfInputRef.current.click()}
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+              </svg>
+              Upload PDF Template
+            </button>
+            
+            <div className="relative flex items-center my-4">
+              <div className="flex-grow border-t border-gray-300"></div>
+              <span className="flex-shrink mx-4 text-gray-500">or</span>
+              <div className="flex-grow border-t border-gray-300"></div>
+            </div>
+            
+            <button
+              className="w-full py-3 px-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-medium rounded-lg shadow-md hover:from-green-600 hover:to-emerald-700 transition-all transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 flex items-center justify-center"
+              onClick={handleCreateBlankTemplate}
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+              Create Blank Template
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -563,52 +681,129 @@ const Canva = () => {
   // Column Mapping Interface
   if (showColumnMapping) {
     return (
-      <div className="flex h-screen bg-gray-50">
-        <div className="flex-1 p-8">
-          <h1 className="text-2xl font-bold mb-6">Map Excel Columns to Objects</h1>
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h2 className="text-xl font-semibold mb-4">Excel Columns</h2>
-                <ul className="space-y-2">
-                  {columns.map((col, index) => (
-                    <li key={index} className="p-3 bg-gray-100 rounded">
-                      {col}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h2 className="text-xl font-semibold mb-4">Canvas Objects</h2>
-                <div className="space-y-4">
-                  {shapes.map((shape) => (
-                    <div key={shape.id} className="p-3 bg-white border rounded">
-                      <div className="font-medium">{shape.name}</div>
-                      <div className="mt-2">
-                        <label className="block text-sm text-gray-600 mb-1">Map to column:</label>
-                        <select
-                          value={columnMapping[shape.id] || ""}
-                          onChange={(e) => handleMappingChange(shape.id, e.target.value)}
-                          className="w-full p-2 border rounded"
-                        >
-                          <option value="">Select column</option>
-                          {columns.map((col) => (
-                            <option key={col} value={col}>{col}</option>
-                          ))}
-                        </select>
-                      </div>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6">
+              <h1 className="text-2xl font-bold text-white">Map Excel Columns to Objects</h1>
+              <p className="text-blue-100 mt-1">Connect your data fields to design elements</p>
+            </div>
+            
+            <div className="p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <div className="flex items-center mb-4">
+                    <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center mr-3">
+                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+                      </svg>
                     </div>
-                  ))}
+                    <h2 className="text-xl font-semibold text-gray-800">Excel Columns</h2>
+                  </div>
+                  <div className="space-y-3">
+                    {columns.length > 0 ? (
+                      columns.map((col, index) => (
+                        <div key={index} className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm flex items-center">
+                          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center mr-3">
+                            <span className="text-blue-600 font-medium">{index + 1}</span>
+                          </div>
+                          <span className="font-medium text-gray-700">{col}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        No columns found in Excel file
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="bg-gray-50 rounded-xl p-6">
+                  <div className="flex items-center mb-4">
+                    <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center mr-3">
+                      <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                      </svg>
+                    </div>
+                    <h2 className="text-xl font-semibold text-gray-800">Canvas Objects</h2>
+                  </div>
+                  <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+                    {shapes.length > 0 ? (
+                      shapes.map((shape) => (
+                        <div key={shape.id} className="p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+                          <div className="flex items-start">
+                            <div className="mr-3 mt-1">
+                              {shape.type === "text" && (
+                                <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                  </svg>
+                                </div>
+                              )}
+                              {shape.type === "image" && (
+                                <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                  </svg>
+                                </div>
+                              )}
+                              {shape.type === "rect" && (
+                                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+                                  </svg>
+                                </div>
+                              )}
+                              {shape.type === "path" && (
+                                <div className="w-8 h-8 rounded-full bg-yellow-100 flex items-center justify-center">
+                                  <svg className="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                                  </svg>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              <div className="font-medium text-gray-800">{shape.name}</div>
+                              <div className="mt-3">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Map to column:</label>
+                                <select
+                                  value={columnMapping[shape.id] || ""}
+                                  onChange={(e) => handleMappingChange(shape.id, e.target.value)}
+                                  className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                >
+                                  <option value="">Select column</option>
+                                  {columns.map((col) => (
+                                    <option key={col} value={col}>{col}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        No objects found in template
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="mt-8 flex justify-end">
-              <button
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
-                onClick={saveColumnMapping}
-              >
-                Save Mapping
-              </button>
+              
+              <div className="mt-8 flex flex-col sm:flex-row justify-end gap-3">
+                <button
+                  className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                  onClick={cancelColumnMapping}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-medium rounded-lg shadow hover:from-blue-600 hover:to-indigo-700 transition-all"
+                  onClick={saveColumnMapping}
+                >
+                  Save Mapping & Continue
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -621,54 +816,68 @@ const Canva = () => {
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         {/* Toolbar */}
-        <div className="p-3 bg-white shadow flex gap-3 items-center flex-wrap">
-          <button
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
-            onClick={addRectangle}
-          >
-            Rectangle
-          </button>
-          <button
-            className="px-4 py-2 bg-green-600 text-white rounded-lg shadow hover:bg-green-700 transition"
-            onClick={addText}
-          >
-            Text
-          </button>
-          <button
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg shadow hover:bg-purple-700 transition"
-            onClick={addImage}
-          >
-            Image
-          </button>
-          <input
-            type="file"
-            accept="image/*"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleImageUpload}
-          />
-          <button
-            className="px-4 py-2 bg-yellow-600 text-white rounded-lg shadow hover:bg-yellow-700 transition"
-            onClick={() => excelInputRef.current.click()}
-          >
-            Upload Excel
-          </button>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            ref={excelInputRef}
-            className="hidden"
-            onChange={handleExcelUpload}
-          />
-          <button
-            className="px-4 py-2 bg-red-600 text-white rounded-lg shadow hover:bg-red-700 transition"
-            onClick={handleGenerate}
-          >
-            Generate PNGs
-          </button>
-          <div className="ml-auto flex gap-2 flex-wrap">
+        <div className="p-4 bg-white shadow-sm border-b flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap gap-2">
             <button
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow hover:bg-gray-700 transition"
+              className="px-4 py-2 bg-blue-100 text-blue-700 font-medium rounded-lg hover:bg-blue-200 transition-colors flex items-center"
+              onClick={addRectangle}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+              </svg>
+              Rectangle
+            </button>
+            <button
+              className="px-4 py-2 bg-green-100 text-green-700 font-medium rounded-lg hover:bg-green-200 transition-colors flex items-center"
+              onClick={addText}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+              Text
+            </button>
+            <button
+              className="px-4 py-2 bg-purple-100 text-purple-700 font-medium rounded-lg hover:bg-purple-200 transition-colors flex items-center"
+              onClick={addImage}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+              </svg>
+              Image
+            </button>
+          </div>
+          
+          <div className="flex flex-wrap gap-2 ml-auto">
+            <button
+              className="px-4 py-2 bg-yellow-100 text-yellow-700 font-medium rounded-lg hover:bg-yellow-200 transition-colors flex items-center"
+              onClick={() => excelInputRef.current.click()}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"></path>
+              </svg>
+              Upload Excel
+            </button>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              ref={excelInputRef}
+              className="hidden"
+              onChange={handleExcelUpload}
+            />
+            <button
+              className="px-4 py-2 bg-red-100 text-red-700 font-medium rounded-lg hover:bg-red-200 transition-colors flex items-center"
+              onClick={handleGenerate}
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+              </svg>
+              Generate PNGs
+            </button>
+          </div>
+          
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
               onClick={() => {
                 const stage = stageRef.current;
                 const pointer = stage.getPointerPosition();
@@ -685,10 +894,12 @@ const Canva = () => {
                 setStagePos(newPos);
               }}
             >
-              Zoom In
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+              </svg>
             </button>
             <button
-              className="px-4 py-2 bg-gray-600 text-white rounded-lg shadow hover:bg-gray-700 transition"
+              className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
               onClick={() => {
                 const stage = stageRef.current;
                 const pointer = stage.getPointerPosition();
@@ -705,7 +916,9 @@ const Canva = () => {
                 setStagePos(newPos);
               }}
             >
-              Zoom Out
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"></path>
+              </svg>
             </button>
           </div>
         </div>
@@ -725,7 +938,7 @@ const Canva = () => {
             ref={stageRef}
             onMouseDown={handleStageMouseDown}
             onWheel={handleWheel}
-            style={{ backgroundColor: "#e5e7eb" }}
+            style={{ backgroundColor: "#f3f4f6" }}
           >
             <Layer>
               {/* Canvas Background */}
@@ -734,8 +947,8 @@ const Canva = () => {
                 y={0}
                 width={canvasWidth}
                 height={canvasHeight}
-                fill="#f9fafb"
-                stroke="#000"
+                fill="#ffffff"
+                stroke="#e5e7eb"
                 strokeWidth={1 / scale}
                 listening={false}
               />
@@ -745,7 +958,7 @@ const Canva = () => {
                 <Line
                   key={`v${i}`}
                   points={[i * 50, 0, i * 50, canvasHeight]}
-                  stroke="#eee"
+                  stroke="#f3f4f6"
                   strokeWidth={1 / scale}
                   listening={false}
                 />
@@ -754,7 +967,7 @@ const Canva = () => {
                 <Line
                   key={`h${i}`}
                   points={[0, i * 50, canvasWidth, i * 50]}
-                  stroke="#eee"
+                  stroke="#f3f4f6"
                   strokeWidth={1 / scale}
                   listening={false}
                 />
@@ -772,7 +985,6 @@ const Canva = () => {
                         {...shape}
                         onClick={handleSelect}
                         onMouseDown={handleSelect}
-                        onDragStart={handleShapeDragStart}
                         onDragEnd={handleShapeDragEnd}
                         onTransformEnd={(e) => {
                           e.evt.stopPropagation();
@@ -891,175 +1103,278 @@ const Canva = () => {
 
       {/* Side Panel */}
       <div
-        className={`w-72 bg-white p-5 border-l shadow-lg transition-all ${
+        className={`w-80 bg-white border-l shadow-lg transition-all duration-300 ease-in-out ${
           selectedId ? "block" : "hidden"
         }`}
       >
-        {selectedShape && (
-          <div className="space-y-5">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-3">Edit Properties</h2>
-            
-            {/* Z-Index Controls */}
-            <div className="border-b pb-3">
-              <label className="block text-gray-600 mb-2">Z-Index</label>
-              <div className="flex gap-2">
-                <button 
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                  onClick={moveToFront}
-                >
-                  To Front
-                </button>
-                <button 
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                  onClick={moveToBack}
-                >
-                  To Back
-                </button>
-                <button 
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                  onClick={moveUp}
-                >
-                  Up
-                </button>
-                <button 
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300"
-                  onClick={moveDown}
-                >
-                  Down
-                </button>
-              </div>
+        <div className="p-5 h-full flex flex-col">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-800">Properties</h2>
+            <div className="flex gap-2">
+              <button 
+                onClick={deleteSelectedShape}
+                className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                title="Delete Object"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+              </button>
+              <button 
+                onClick={() => setSelectedId(null)}
+                className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+                title="Close Panel"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
             </div>
-
-            <div>
-              <label className="block text-gray-600 mb-1">Name</label>
-              <input
-                type="text"
-                value={selectedShape.name}
-                onChange={(e) => updateShapeProperty("name", e.target.value)}
-                className="w-full p-2 border rounded-lg"
-              />
-            </div>
-
-            {selectedShape.type === "rect" && (
-              <>
-                <div>
-                  <label className="block text-gray-600 mb-1">Fill Color</label>
-                  <input
-                    type="color"
-                    value={selectedShape.fill}
-                    onChange={(e) => updateShapeProperty("fill", e.target.value)}
-                    className="w-full h-10 rounded-lg border"
-                  />
+          </div>
+          
+          {selectedShape && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="space-y-6">
+                {/* Object Info */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <div className="flex items-center">
+                    <div className="mr-3">
+                      {selectedShape.type === "text" && (
+                        <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                          </svg>
+                        </div>
+                      )}
+                      {selectedShape.type === "image" && (
+                        <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                          </svg>
+                        </div>
+                      )}
+                      {selectedShape.type === "rect" && (
+                        <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+                          </svg>
+                        </div>
+                      )}
+                      {selectedShape.type === "path" && (
+                        <div className="w-10 h-10 rounded-lg bg-yellow-100 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01"></path>
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-800">{selectedShape.name}</div>
+                      <div className="text-sm text-gray-500 capitalize">{selectedShape.type}</div>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Width</label>
-                  <input
-                    type="number"
-                    value={selectedShape.width}
-                    onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
-                    className="w-full p-2 border rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Height</label>
-                  <input
-                    type="number"
-                    value={selectedShape.height}
-                    onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
-                    className="w-full p-2 border rounded-lg"
-                  />
-                </div>
-              </>
-            )}
 
-            {selectedShape.type === "text" && (
-              <>
+                {/* Z-Index Controls */}
+                <div className="border-b pb-4">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Layer Order</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      className="py-2 px-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center justify-center"
+                      onClick={moveToFront}
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                      </svg>
+                      To Front
+                    </button>
+                    <button 
+                      className="py-2 px-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center justify-center"
+                      onClick={moveToBack}
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                      </svg>
+                      To Back
+                    </button>
+                    <button 
+                      className="py-2 px-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center justify-center"
+                      onClick={moveUp}
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7"></path>
+                      </svg>
+                      Move Up
+                    </button>
+                    <button 
+                      className="py-2 px-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm flex items-center justify-center"
+                      onClick={moveDown}
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
+                      </svg>
+                      Move Down
+                    </button>
+                  </div>
+                </div>
+
+                {/* Name */}
                 <div>
-                  <label className="block text-gray-600 mb-1">Text</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
                   <input
                     type="text"
-                    value={selectedShape.text}
-                    onChange={(e) => updateShapeProperty("text", e.target.value)}
-                    className="w-full p-2 border rounded-lg"
+                    value={selectedShape.name}
+                    onChange={(e) => updateShapeProperty("name", e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Font Size</label>
-                  <input
-                    type="number"
-                    value={selectedShape.fontSize}
-                    onChange={(e) => updateShapeProperty("fontSize", parseInt(e.target.value))}
-                    className="w-full p-2 border rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Fill Color</label>
-                  <input
-                    type="color"
-                    value={selectedShape.fill}
-                    onChange={(e) => updateShapeProperty("fill", e.target.value)}
-                    className="w-full h-10 rounded-lg border"
-                  />
-                </div>
-              </>
-            )}
 
-            {selectedShape.type === "image" && (
-              <>
-                <div>
-                  <label className="block text-gray-600 mb-1">Width</label>
-                  <input
-                    type="number"
-                    value={selectedShape.width}
-                    onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
-                    className="w-full p-2 border rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Height</label>
-                  <input
-                    type="number"
-                    value={selectedShape.height}
-                    onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
-                    className="w-full p-2 border rounded-lg"
-                  />
-                </div>
-              </>
-            )}
+                {/* Data Mapping */}
+                {(selectedShape.type === "text" || selectedShape.type === "image") && columns.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Map to Excel Column</label>
+                    <select
+                      value={selectedShape.dataField || ""}
+                      onChange={(e) => updateShapeProperty("dataField", e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">None</option>
+                      {columns.map((col) => (
+                        <option key={col} value={col}>{col}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
-            {selectedShape.type === "path" && (
-              <>
-                <div>
-                  <label className="block text-gray-600 mb-1">Fill Color</label>
-                  <input
-                    type="color"
-                    value={selectedShape.fill || "#000000"}
-                    onChange={(e) => updateShapeProperty("fill", e.target.value || null)}
-                    className="w-full h-10 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Stroke Color</label>
-                  <input
-                    type="color"
-                    value={selectedShape.stroke || "#000000"}
-                    onChange={(e) => updateShapeProperty("stroke", e.target.value || null)}
-                    className="w-full h-10 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-600 mb-1">Stroke Width</label>
-                  <input
-                    type="number"
-                    value={selectedShape.strokeWidth}
-                    onChange={(e) => updateShapeProperty("strokeWidth", parseFloat(e.target.value))}
-                    className="w-full p-2 border rounded-lg"
-                  />
-                </div>
-              </>
-            )}
-          </div>
-        )}
+                {/* Type-specific properties */}
+                {selectedShape.type === "rect" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Fill Color</label>
+                      <input
+                        type="color"
+                        value={selectedShape.fill}
+                        onChange={(e) => updateShapeProperty("fill", e.target.value)}
+                        className="w-full h-10 rounded-lg border border-gray-300"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Width</label>
+                        <input
+                          type="number"
+                          value={selectedShape.width}
+                          onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Height</label>
+                        <input
+                          type="number"
+                          value={selectedShape.height}
+                          onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedShape.type === "text" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Text Content</label>
+                      <input
+                        type="text"
+                        value={selectedShape.text}
+                        onChange={(e) => updateShapeProperty("text", e.target.value)}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Font Size</label>
+                        <input
+                          type="number"
+                          value={selectedShape.fontSize}
+                          onChange={(e) => updateShapeProperty("fontSize", parseInt(e.target.value))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Text Color</label>
+                        <input
+                          type="color"
+                          value={selectedShape.fill}
+                          onChange={(e) => updateShapeProperty("fill", e.target.value)}
+                          className="w-full h-10 rounded-lg border border-gray-300"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedShape.type === "image" && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Width</label>
+                        <input
+                          type="number"
+                          value={selectedShape.width}
+                          onChange={(e) => updateShapeProperty("width", parseInt(e.target.value))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Height</label>
+                        <input
+                          type="number"
+                          value={selectedShape.height}
+                          onChange={(e) => updateShapeProperty("height", parseInt(e.target.value))}
+                          className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {selectedShape.type === "path" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Fill Color</label>
+                      <input
+                        type="color"
+                        value={selectedShape.fill || "#000000"}
+                        onChange={(e) => updateShapeProperty("fill", e.target.value || null)}
+                        className="w-full h-10 rounded-lg border border-gray-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Stroke Color</label>
+                      <input
+                        type="color"
+                        value={selectedShape.stroke || "#000000"}
+                        onChange={(e) => updateShapeProperty("stroke", e.target.value || null)}
+                        className="w-full h-10 rounded-lg border border-gray-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Stroke Width</label>
+                      <input
+                        type="number"
+                        value={selectedShape.strokeWidth}
+                        onChange={(e) => updateShapeProperty("strokeWidth", parseFloat(e.target.value))}
+                        className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
