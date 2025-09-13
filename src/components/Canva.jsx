@@ -27,6 +27,7 @@ const Canva = () => {
   // =========================
   const [history, setHistory] = useState([]); // Array of past states
   const [future, setFuture] = useState([]);   // Array of future states (after undo)
+
   const stageRef = useRef(null);
   const transformerRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -49,8 +50,6 @@ const Canva = () => {
     setShapes([]);
     setPdfUploaded(true);
     setShowBlankTemplate(false);
-
-    // Save initial state to history
     saveToHistory([]);
   };
 
@@ -64,24 +63,30 @@ const Canva = () => {
       setPdfUploaded(false);
       return;
     }
+
     const formData = new FormData();
     formData.append("file", file);
+
     try {
       const res = await fetch("http://localhost:8000/extract", {
         method: "POST",
         body: formData,
       });
+
       if (!res.ok) {
         const errorText = await res.text();
         throw new Error(`HTTP error! Status: ${res.status}, Message: ${errorText}`);
       }
+
       const data = await res.json();
       setPagesData(data.pages);
       const page = data.pages[0];
       setCanvasWidth(page.width);
       setCanvasHeight(page.height);
+
       const newShapes = [];
       let idCounter = 1;
+
       page.texts.forEach((t) => {
         if (t.text) {
           newShapes.push({
@@ -96,9 +101,13 @@ const Canva = () => {
             draggable: true,
             dataField: null,
             zIndex: idCounter,
+            scaleX: 1,
+            scaleY: 1,
+            rotation: 0,
           });
         }
       });
+
       page.images.forEach((im) => {
         const img = new window.Image();
         img.src = im.image_url;
@@ -114,8 +123,12 @@ const Canva = () => {
           draggable: true,
           dataField: null,
           zIndex: idCounter,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
         });
       });
+
       page.shapes.forEach((sh) => {
         if (sh.path_data) {
           newShapes.push({
@@ -131,14 +144,16 @@ const Canva = () => {
             draggable: true,
             dataField: null,
             zIndex: idCounter,
+            scaleX: 1,
+            scaleY: 1,
+            rotation: 0,
           });
         }
       });
+
       newShapes.sort((a, b) => a.zIndex - b.zIndex);
       setShapes(newShapes);
       setPdfUploaded(true);
-
-      // Save state to history
       saveToHistory(newShapes);
     } catch (error) {
       console.error("Fetch error:", error.message);
@@ -152,6 +167,7 @@ const Canva = () => {
   const handleExcelUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const data = event.target.result;
@@ -177,16 +193,13 @@ const Canva = () => {
   };
 
   const saveColumnMapping = () => {
-    // Create a new array of shapes with updated dataField
-    const updatedShapes = shapes.map(shape => ({
+    const updatedShapes = shapes.map((shape) => ({
       ...shape,
-      dataField: columnMapping[shape.id] || null
+      dataField: columnMapping[shape.id] || null,
     }));
     setShapes(updatedShapes);
     setShowColumnMapping(false);
     setColumnMapping({});
-
-    // Save state to history
     saveToHistory(updatedShapes);
   };
 
@@ -196,58 +209,90 @@ const Canva = () => {
   };
 
   // =========================
-  // Generate PNGs (FIXED - NO STATE MUTATION)
+  // CLONE SHAPES (DEEP CLONE WITH TRANSFORMS)
   // =========================
   const cloneShapes = (shapes) => {
     return shapes.map((shape) => {
       const cloned = { ...shape };
       if (shape.image) {
-        // Deep clone the image by creating a new Image object with the same src
         const img = new window.Image();
-        img.src = shape.image.src; // This is safe, we're not mutating the original
+        img.src = shape.image.src;
         cloned.image = img;
       }
+      // Preserve all transform properties
+      if (shape.scaleX !== undefined) cloned.scaleX = shape.scaleX;
+      if (shape.scaleY !== undefined) cloned.scaleY = shape.scaleY;
+      if (shape.rotation !== undefined) cloned.rotation = shape.rotation;
       return cloned;
     });
   };
 
+  // =========================
+  // GENERATE PNGs (IMMUTABLE, SAFE)
+  // =========================
   const handleGenerate = async () => {
     if (rows.length === 0) {
       alert("Please upload an Excel file first.");
       return;
     }
+
     const dataURLs = [];
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      // Create a DEEP COPY of the current shapes for this iteration
-      const tempShapes = cloneShapes(shapes);
-      const promises = [];
 
-      tempShapes.forEach((shape) => {
+      // Create a DEEP COPY of the current shapes for this iteration
+      let tempShapes = cloneShapes(shapes);
+
+      const imagePromises = [];
+
+      // Update text and collect image promises — IMMUTABLY
+      tempShapes = tempShapes.map((shape) => {
         if (shape.dataField) {
           const colIndex = columns.indexOf(shape.dataField);
           if (colIndex !== -1) {
             const value = row[colIndex];
+
             if (shape.type === "text") {
-              shape.text = value ? value.toString() : "";
+              return {
+                ...shape,
+                text: value ? value.toString() : "",
+              };
             } else if (shape.type === "image" && value) {
-              promises.push(
+              imagePromises.push(
                 new Promise((resolve, reject) => {
                   const img = new window.Image();
                   img.onload = () => {
-                    shape.image = img;
-                    resolve();
+                    resolve({
+                      id: shape.id,
+                      image: img,
+                    });
                   };
                   img.onerror = reject;
                   img.src = value;
                 })
               );
+              return shape; // Keep original until resolved
             }
           }
         }
+        return shape;
       });
 
-      await Promise.all(promises);
+      // Wait for all images to load
+      const resolvedImages = await Promise.all(imagePromises);
+
+      // Apply resolved images to tempShapes
+      tempShapes = tempShapes.map((shape) => {
+        const matchedImage = resolvedImages.find((imgObj) => imgObj.id === shape.id);
+        if (matchedImage) {
+          return {
+            ...shape,
+            image: matchedImage.image,
+          };
+        }
+        return shape;
+      });
 
       // Render to off-screen stage
       const div = document.createElement("div");
@@ -265,13 +310,28 @@ const Canva = () => {
         let node;
         switch (shape.type) {
           case "rect":
-            node = new Konva.Rect(shape);
+            node = new Konva.Rect({
+              ...shape,
+              scaleX: shape.scaleX || 1,
+              scaleY: shape.scaleY || 1,
+              rotation: shape.rotation || 0,
+            });
             break;
           case "text":
-            node = new Konva.Text(shape);
+            node = new Konva.Text({
+              ...shape,
+              scaleX: shape.scaleX || 1,
+              scaleY: shape.scaleY || 1,
+              rotation: shape.rotation || 0,
+            });
             break;
           case "image":
-            node = new Konva.Image(shape);
+            node = new KonvaImage({
+              ...shape,
+              scaleX: shape.scaleX || 1,
+              scaleY: shape.scaleY || 1,
+              rotation: shape.rotation || 0,
+            });
             break;
           case "path":
             node = new Konva.Path({
@@ -303,12 +363,13 @@ const Canva = () => {
       const base64Data = url.split(",")[1];
       zip.file(`design_${i + 1}.png`, base64Data, { base64: true });
     });
+
     const blob = await zip.generateAsync({ type: "blob" });
     saveAs(blob, "designs.zip");
   };
 
   // =========================
-  // Shape Selection & Transformer
+  // SHAPE SELECTION & TRANSFORMER
   // =========================
   const handleSelect = (e) => {
     const id = e.target.id();
@@ -339,7 +400,7 @@ const Canva = () => {
   };
 
   // =========================
-  // Zoom and Drag Functionality
+  // ZOOM AND DRAG FUNCTIONALITY
   // =========================
   const handleWheel = (e) => {
     e.evt.preventDefault();
@@ -362,7 +423,7 @@ const Canva = () => {
   };
 
   // =========================
-  // GLOBAL DRAG HANDLERS (FIXED: Prevents ANY drag interference)
+  // GLOBAL DRAG HANDLERS
   // =========================
   const handleLayerDragStart = (e) => {
     e.evt.preventDefault();
@@ -374,28 +435,22 @@ const Canva = () => {
 
   const handleLayerDragEnd = (e) => {
     e.evt.stopPropagation();
-
     const target = e.target;
     const shapeNode = target.getParent() || target;
     const shapeId = shapeNode.id();
-
     if (shapeId && shapeId !== "transformer") {
-      setShapes((prev) =>
-        prev.map((s) =>
-          s.id === shapeId
-            ? {
-                ...s,
-                x: shapeNode.x(),
-                y: shapeNode.y(),
-              }
-            : s
-        )
+      const updatedShapes = shapes.map((s) =>
+        s.id === shapeId
+          ? {
+              ...s,
+              x: shapeNode.x(),
+              y: shapeNode.y(),
+            }
+          : s
       );
-
-      // Save state to history after any drag/transform
-      saveToHistory(shapes.map(s => ({...s}))); // shallow clone each shape
+      setShapes(updatedShapes);
+      saveToHistory(updatedShapes); // ✅ Use NEW state
     }
-
     if (stageRef.current) {
       stageRef.current.draggable(true);
     }
@@ -409,8 +464,6 @@ const Canva = () => {
       const updatedShapes = shapes.filter((shape) => shape.id !== selectedId);
       setShapes(updatedShapes);
       setSelectedId(null);
-
-      // Save state to history
       saveToHistory(updatedShapes);
     }
   };
@@ -431,11 +484,12 @@ const Canva = () => {
       draggable: true,
       dataField: null,
       zIndex: shapes.length + 1,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
     };
     setShapes((prev) => [...prev, newShape]);
     setSelectedId(newShape.id);
-
-    // Save state to history
     saveToHistory([...shapes, newShape]);
   };
 
@@ -452,11 +506,12 @@ const Canva = () => {
       draggable: true,
       dataField: null,
       zIndex: shapes.length + 1,
+      scaleX: 1,
+      scaleY: 1,
+      rotation: 0,
     };
     setShapes((prev) => [...prev, newShape]);
     setSelectedId(newShape.id);
-
-    // Save state to history
     saveToHistory([...shapes, newShape]);
   };
 
@@ -465,6 +520,7 @@ const Canva = () => {
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new window.Image();
@@ -482,11 +538,12 @@ const Canva = () => {
           draggable: true,
           dataField: null,
           zIndex: shapes.length + 1,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
         };
         setShapes((prev) => [...prev, newShape]);
         setSelectedId(newShape.id);
-
-        // Save state to history
         saveToHistory([...shapes, newShape]);
       };
     };
@@ -517,7 +574,7 @@ const Canva = () => {
     );
 
     // Save state to history
-    saveToHistory(shapes.map(s => ({...s})));
+    saveToHistory(shapes.map((s) => ({ ...s })));
   };
 
   // =========================
@@ -534,9 +591,7 @@ const Canva = () => {
       }
       return prev;
     });
-
-    // Save state to history
-    saveToHistory(shapes.map(s => ({...s})));
+    saveToHistory(shapes.map((s) => ({ ...s })));
   };
 
   const moveToBack = () => {
@@ -553,9 +608,7 @@ const Canva = () => {
       }
       return prev;
     });
-
-    // Save state to history
-    saveToHistory(shapes.map(s => ({...s})));
+    saveToHistory(shapes.map((s) => ({ ...s })));
   };
 
   const moveUp = () => {
@@ -572,9 +625,7 @@ const Canva = () => {
       }
       return prev;
     });
-
-    // Save state to history
-    saveToHistory(shapes.map(s => ({...s})));
+    saveToHistory(shapes.map((s) => ({ ...s })));
   };
 
   const moveDown = () => {
@@ -591,52 +642,31 @@ const Canva = () => {
       }
       return prev;
     });
-
-    // Save state to history
-    saveToHistory(shapes.map(s => ({...s})));
+    saveToHistory(shapes.map((s) => ({ ...s })));
   };
 
   // =========================
   // HISTORY MANAGEMENT
   // =========================
   const saveToHistory = (newState) => {
-    // Always clear future stack when a new action is made
     setFuture([]);
-
-    // Add the new state to history (deep clone)
     const serializedState = JSON.parse(JSON.stringify(newState));
-    setHistory(prev => [...prev, serializedState]);
+    setHistory((prev) => [...prev, serializedState]);
   };
 
   const undo = () => {
     if (history.length === 0) return;
-
-    // Get the last state from history
     const lastState = history[history.length - 1];
-
-    // Move it to future
-    setFuture(prev => [...prev, lastState]);
-
-    // Remove it from history
-    setHistory(prev => prev.slice(0, -1));
-
-    // Set shapes to the previous state
-    setShapes(history[history.length - 2] || []); // If history has 1 item, go back to empty
+    setFuture((prev) => [...prev, lastState]);
+    setHistory((prev) => prev.slice(0, -1));
+    setShapes(history[history.length - 2] || []);
   };
 
   const redo = () => {
     if (future.length === 0) return;
-
-    // Get the next state from future
     const nextState = future[future.length - 1];
-
-    // Move it to history
-    setHistory(prev => [...prev, nextState]);
-
-    // Remove it from future
-    setFuture(prev => prev.slice(0, -1));
-
-    // Set shapes to the next state
+    setHistory((prev) => [...prev, nextState]);
+    setFuture((prev) => prev.slice(0, -1));
     setShapes(nextState);
   };
 
@@ -1162,7 +1192,6 @@ const Canva = () => {
               </svg>
             </button>
           </div>
-
           {/* UNDO/REDO BUTTONS */}
           <div className="flex gap-2 ml-4">
             <button
@@ -1247,26 +1276,33 @@ const Canva = () => {
                         key={shape.id}
                         id={shape.id}
                         {...shape}
+                        scaleX={shape.scaleX || 1}
+                        scaleY={shape.scaleY || 1}
+                        rotation={shape.rotation || 0}
                         onClick={handleSelect}
                         onMouseDown={handleSelect}
                         onTransformEnd={(e) => {
                           e.evt.stopPropagation();
                           const node = e.target;
-                          setShapes((prev) =>
-                            prev.map((s) =>
-                              s.id === shape.id
-                                ? {
-                                    ...s,
-                                    x: node.x(),
-                                    y: node.y(),
-                                    width: Math.max(10, node.width() * node.scaleX()),
-                                    height: Math.max(10, node.height() * node.scaleY()),
-                                  }
-                                : s
-                            )
+                          const updatedShapes = shapes.map((s) =>
+                            s.id === shape.id
+                              ? {
+                                  ...s,
+                                  x: node.x(),
+                                  y: node.y(),
+                                  width: Math.max(10, node.width() * node.scaleX()),
+                                  height: Math.max(10, node.height() * node.scaleY()),
+                                  scaleX: node.scaleX(),
+                                  scaleY: node.scaleY(),
+                                  rotation: node.rotation(),
+                                }
+                              : s
                           );
+                          setShapes(updatedShapes);
+                          saveToHistory(updatedShapes);
                           node.scaleX(1);
                           node.scaleY(1);
+                          node.rotation(0);
                         }}
                       />
                     );
@@ -1276,25 +1312,32 @@ const Canva = () => {
                         key={shape.id}
                         id={shape.id}
                         {...shape}
+                        scaleX={shape.scaleX || 1}
+                        scaleY={shape.scaleY || 1}
+                        rotation={shape.rotation || 0}
                         onClick={handleSelect}
                         onMouseDown={handleSelect}
                         onTransformEnd={(e) => {
                           e.evt.stopPropagation();
                           const node = e.target;
-                          setShapes((prev) =>
-                            prev.map((s) =>
-                              s.id === shape.id
-                                ? {
-                                    ...s,
-                                    x: node.x(),
-                                    y: node.y(),
-                                    fontSize: Math.max(10, node.fontSize() * node.scaleX()),
-                                  }
-                                : s
-                            )
+                          const updatedShapes = shapes.map((s) =>
+                            s.id === shape.id
+                              ? {
+                                  ...s,
+                                  x: node.x(),
+                                  y: node.y(),
+                                  fontSize: Math.max(10, node.fontSize() * node.scaleX()),
+                                  scaleX: node.scaleX(),
+                                  scaleY: node.scaleY(),
+                                  rotation: node.rotation(),
+                                }
+                              : s
                           );
+                          setShapes(updatedShapes);
+                          saveToHistory(updatedShapes);
                           node.scaleX(1);
                           node.scaleY(1);
+                          node.rotation(0);
                         }}
                       />
                     );
@@ -1304,26 +1347,33 @@ const Canva = () => {
                         key={shape.id}
                         id={shape.id}
                         {...shape}
+                        scaleX={shape.scaleX || 1}
+                        scaleY={shape.scaleY || 1}
+                        rotation={shape.rotation || 0}
                         onClick={handleSelect}
                         onMouseDown={handleSelect}
                         onTransformEnd={(e) => {
                           e.evt.stopPropagation();
                           const node = e.target;
-                          setShapes((prev) =>
-                            prev.map((s) =>
-                              s.id === shape.id
-                                ? {
-                                    ...s,
-                                    x: node.x(),
-                                    y: node.y(),
-                                    width: Math.max(10, node.width() * node.scaleX()),
-                                    height: Math.max(10, node.height() * node.scaleY()),
-                                  }
-                                : s
-                            )
+                          const updatedShapes = shapes.map((s) =>
+                            s.id === shape.id
+                              ? {
+                                  ...s,
+                                  x: node.x(),
+                                  y: node.y(),
+                                  width: Math.max(10, node.width() * node.scaleX()),
+                                  height: Math.max(10, node.height() * node.scaleY()),
+                                  scaleX: node.scaleX(),
+                                  scaleY: node.scaleY(),
+                                  rotation: node.rotation(),
+                                }
+                              : s
                           );
+                          setShapes(updatedShapes);
+                          saveToHistory(updatedShapes);
                           node.scaleX(1);
                           node.scaleY(1);
+                          node.rotation(0);
                         }}
                       />
                     );
@@ -1345,7 +1395,6 @@ const Canva = () => {
                     );
                   return null;
                 })}
-
               <Transformer
                 ref={transformerRef}
                 boundBoxFunc={(oldBox, newBox) => ({
@@ -1411,6 +1460,7 @@ const Canva = () => {
               </button>
             </div>
           </div>
+
           {selectedShape && (
             <div className="flex-1 overflow-y-auto">
               <div className="space-y-6">

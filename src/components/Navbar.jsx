@@ -2,16 +2,13 @@
 
 import React from "react";
 import Link from "next/link"; 
-import { useSession, signOut } from "next-auth/react";
 
 const Navbar = () => {
-  const { data: session, status } = useSession();
 
   return (
     <nav className="sticky top-0 z-50 bg-white shadow-sm border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
           <div className="flex items-center">
             <Link href="/">
               <div className="flex items-center gap-2 cursor-pointer">
@@ -34,34 +31,7 @@ const Navbar = () => {
             </Link>
           </div>
 
-          {/* Right side */}
           <div className="flex items-center gap-3">
-            {status === "loading" ? (
-              <span className="text-gray-500">Loading...</span>
-            ) : session && session.user ? (
-              // When logged in
-              <div className="flex items-center gap-3">
-                <Link href="/profile">
-                  <div className="flex items-center gap-2 cursor-pointer">
-                    <img
-                      src={session.user.image || "/default-avatar.png"}
-                      alt="profile"
-                      className="w-8 h-8 rounded-full border"
-                    />
-                    <span className="text-gray-800 font-medium">
-                      {session.user.name || session.user.email || "User"}
-                    </span>
-                  </div>
-                </Link>
-                <button
-                  onClick={() => signOut()}
-                  className="px-4 py-2 border border-red-600 text-red-600 font-medium rounded-lg hover:bg-red-50 transition-colors"
-                >
-                  Logout
-                </button>
-              </div>
-            ) : (
-              // When logged out
               <>
                 <Link href="/login">
                   <button className="px-4 py-2 border border-indigo-600 text-indigo-600 font-medium rounded-lg hover:bg-indigo-50 transition-colors">
@@ -74,7 +44,6 @@ const Navbar = () => {
                   </button>
                 </Link>
               </>
-            )}
           </div>
 
           <div className="md:hidden flex items-center">
